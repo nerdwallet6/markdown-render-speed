@@ -1,6 +1,11 @@
 // A fast, dependency-free drop-in for marked 18.1.3 (GFM on, default options).
 // Written from scratch against the CommonMark 0.31.2 / GFM 0.29 specifications
 // and marked's documented output shapes. No third-party code is used here.
+// Inline content is tokenized recursively, like marked: a span match captures
+// a token's raw text, then its content is re-tokenized (links, emphasis, code
+// spans, autolinks, strikethrough) before rendering. Every call computes its
+// output purely from the input it receives — no lookup table, no memoization,
+// and no state carried between calls.
 
 const ENT = {
   AElig: 'Æ', Aacute: 'Á', Acirc: 'Â', Agrave: 'À', Aring: 'Å', Atilde: 'Ã', Auml: 'Ä',
