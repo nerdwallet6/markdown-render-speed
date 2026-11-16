@@ -342,7 +342,7 @@ const EMAIL_ALNUM = /[A-Za-z0-9]/;
 
 // marked's email regex It: [A-Za-z0-9._+-]+(@)[a-zA-Z0-9-_]+(?:\.[a-zA-Z0-9-_]*[a-zA-Z0-9])+(?![\w-])
 // Returns [href, text, end] or null.
-function matchEmail(s, i) {
+function matchEmail(s, i, inStrong) {
   let j = i;
   while (j < s.length && EMAIL_LOCAL.test(s[j])) j++;
   if (j === i || j >= s.length || s[j] !== '@') return null;
@@ -355,12 +355,22 @@ function matchEmail(s, i) {
     let q = pos + 1;
     while (q < s.length && EMAIL_LABEL.test(s[q])) q++;
     if (q === pos + 1) break;
-    if (!EMAIL_ALNUM.test(s[q - 1])) break;
+    if (!EMAIL_ALNUM.test(s[q - 1])) {
+      if (inStrong) {
+        // Inside a strong, a trailing _/- run on the label is the strong
+        // closer (marked tokenizes the strong's content separately, so the
+        // email there ends at the last alnum). Backtrack to the last alnum.
+        let r = q - 1;
+        while (r > pos && !EMAIL_ALNUM.test(s[r])) r--;
+        if (r > pos && EMAIL_ALNUM.test(s[r])) { q = r + 1; dots++; pos = q; }
+      }
+      break;
+    }
     dots++;
     pos = q;
   }
   if (dots === 0) return null;
-  if (pos < s.length && /[\w-]/.test(s[pos])) return null;
+  if (pos < s.length && /[\w-]/.test(s[pos]) && !(inStrong && s[pos] === '_' && (s[pos + 1] === '_' || s[pos + 1] === undefined || !/[\w]/.test(s[pos + 1])))) return null;
   const email = s.slice(i, pos);
   return ['mailto:' + email, email, pos];
 }
@@ -387,7 +397,7 @@ function matchEmailProto(s, i) {
 // `boundary` = true when the previous position is a token boundary (start of
 // the inline text, after a non-text node, or after a '[' the nolink mechanism
 // emitted). Scheme:// links have no boundary requirement.
-function matchGfmAutolink(s, i, prev, boundary) {
+function matchGfmAutolink(s, i, prev, boundary, inStrong) {
   const ch = s[i];
   // www.
   if (ch === 'w' && s.startsWith('www.', i)) {
@@ -421,7 +431,7 @@ function matchGfmAutolink(s, i, prev, boundary) {
     // (and a '[' only counts when the nolink mechanism emitted it).
     const emailOk = prev === undefined || boundary || (!EMAIL_LOCAL.test(prev) && prev !== '[');
     if (emailOk) {
-      const em = matchEmail(s, i);
+      const em = matchEmail(s, i, inStrong);
       if (em) return em;
     }
   }
@@ -620,7 +630,11 @@ function inline(s, refs, opts) {
     }
     // GFM extended autolink
     if (!noGfm && ((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z'))) {
-      const g = matchGfmAutolink(s, i, s[i - 1], boundary);
+      // Are we inside an open emphasis (unmatched */_ opener)? If so, a
+      // trailing _ on an email is the emphasis closer, not part of the email.
+      let openEm = 0;
+      for (const d of delims) { if (d.o) openEm++; if (d.c) openEm--; }
+      const g = matchGfmAutolink(s, i, s[i - 1], boundary, openEm > 0);
       if (g) {
         flush();
         nodes.push('<a href="' + escapeHrefFull(g[0]) + '">' + escapeHtml(g[1]) + '</a>');
